@@ -2,11 +2,9 @@
 // The documentation of `plonky2::iop::wire::Wire` is very short, but
 // i think crucially useful.
 
-mod permutation;
-pub use permutation::{
-    bubblesort_schedule, from_permutation_to_bubble_sort_swap_schedule, inverse_permutation,
-    ApplyPermutation, KnuthL, PermutationGate, PermutationsIter, SwapIndexOutOfRange,
-};
+pub mod permutation;
+
+pub mod sudoku;
 
 // Before we have any clear idea on how this works, let's just play around
 // with an attempt at building a minimum viable circuit.

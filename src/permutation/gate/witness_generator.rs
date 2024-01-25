@@ -104,5 +104,9 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
                 item_values.swap(idx1, idx2);
             }
         }
+
+        for (idx, value) in item_values.into_iter().enumerate() {
+            out_buffer.set_target(self.target(gate.output_wire(idx)), value);
+        }
     }
 }

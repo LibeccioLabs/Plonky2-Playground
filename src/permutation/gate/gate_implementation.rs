@@ -68,6 +68,11 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for PermutationGat
         // the others to enforce that the swapped items are a permutation of
         // the two inputs to the swap.
         (if self.enforce_boolean_selectors { 3 } else { 2 }) * self.swap_schedule.len()
+
+        // after applying the swap schedule, we copy the values in positions
+        // pointed by `items_tracker` to the respective `self.output_wire` wires,
+        // which amounts to `self.n_objects` constraints.
+        + self.n_objects
     }
 
     fn degree(&self) -> usize {
@@ -89,7 +94,8 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for PermutationGat
     // This function answers that question.
     fn num_wires(&self) -> usize {
         // We need `self.n_objects` values to input the objects we are about to act on
-        self.n_objects +
+        // and `self.n_objects` more values to copy the output items.
+        2 * self.n_objects +
         // plus, we need a boolean wire for every item in the swap schedule
         // plus, we need two intermediate values to make the swap,
         // for every item in the swap schedule
@@ -152,12 +158,12 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for PermutationGat
             items_tracker[idx2] = new_idx2_wire;
         }
 
-        // as sanity check, we want items_tracker to be the same as self.output_wires
-        debug_assert!(self
-            .output_wires
-            .iter()
-            .zip(items_tracker)
-            .all(|(a, b)| *a == b));
+        // Finally, we copy the wires at the positions contained in
+        // `items_tracker` to the output wires of the gate.
+        for (idx, item_position) in items_tracker.into_iter().enumerate() {
+            constraints
+                .push(vars.local_wires[self.output_wire(idx)] - vars.local_wires[item_position])
+        }
 
         constraints
     }
@@ -206,6 +212,13 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for PermutationGat
             // involving idx1 or idx2 will be imposed on `(new_idx1_target, new_idx2_target)`
             items_tracker[idx1] = new_idx1_target;
             items_tracker[idx2] = new_idx2_target;
+        }
+
+        // We impose that the items stored in `items_tracker` are the same as
+        // the output values of the permutation.
+        for (idx, target) in items_tracker.into_iter().enumerate() {
+            constraints
+                .push(builder.sub_extension(vars.local_wires[self.output_wire(idx)], target));
         }
 
         constraints

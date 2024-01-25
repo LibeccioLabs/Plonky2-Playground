@@ -332,6 +332,7 @@ name = "plonky2_playground"
 version = "0.1.0"
 dependencies = [
  "plonky2",
+ "rand",
 ]
 
 [[package]]
