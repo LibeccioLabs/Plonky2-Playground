@@ -1,3 +1,5 @@
+use crate::permutation;
+
 pub trait SwapSchedule {
     /// Given a number `n_objects`, it outputs a sequence of
     /// swaps that would be attempted on a `n_objects` long vector.
@@ -14,9 +16,9 @@ pub trait SwapSchedule {
     /// if outputs a selection of the swaps provided by `Self::get_swap_sequence`,
     /// so that the composition of the selected swaps amounts to the input permutation.
     ///
-    /// Assumptions: for every permutation, there exists a valid selection.
-    /// If this is not the case, the implementation should crash
-    /// when there is no valid selections.
+    /// Assumptions: if no valid selection exists, the function is still expected
+    /// to return some swap selection. This is needed to avoid crashes in witness
+    /// generation in circuits.
     fn permutation_to_swap_schedule(permutation: &mut [usize]) -> Vec<(bool, usize, usize)>;
 }
 
@@ -105,7 +107,7 @@ fn recursive_permutation_to_2_split_schedule(
     // we need an auxiliary index. We will use it to traverse part1
     let mut idx1: usize = 0;
 
-    for idx2 in 0..part2.len() {
+    'err_escape: for idx2 in 0..part2.len() {
         // if `part2[idx2]` and `part1[idx2]` both "belong to part1",
         // we have to rearrange `part1[idx2]` using `prepare_part1`
         // before applying the swaps between `part1` and `part2`.
@@ -113,6 +115,15 @@ fn recursive_permutation_to_2_split_schedule(
             // so we search for a suitable item in `part1` that
             // "belongs to part2" to swap with `part1[idx2]`
             loop {
+                // If `permutation` was not an actual permutation, it may
+                // happen that `idx1 == part1.len()`, which would cause
+                // out-of-bound access and make the function panic.
+                // for this reason, if that happens, we stop the computation
+                // of `prepare_part1`.
+                if idx1 == part1.len() {
+                    break 'err_escape;
+                }
+
                 // if `part1[idx1]` and `part2[idx1]` "belong to part2",
                 // then we can swap `part1[idx2]` and `part1[idx1]`
                 //
@@ -182,9 +193,19 @@ fn recursive_permutation_to_2_split_schedule(
 
 #[test]
 fn test_recursive_2_split_schedule() {
-    let mut permutation = [1, 3, 8, 4, 2, 5, 0, 7, 6];
-    println!(
-        "{:?}",
-        RecusriveSplitTwoSchedule::permutation_to_swap_schedule(&mut permutation)
-    );
+    let permutation = [1, 3, 8, 4, 2, 5, 0, 7, 6];
+    let mut permutation_inverse = [0; 9];
+    super::permutation_utilities::inverse_permutation(&permutation, &mut permutation_inverse);
+    let schedule =
+        RecusriveSplitTwoSchedule::permutation_to_swap_schedule(&mut permutation_inverse);
+
+    let mut id = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+
+    for (selector, idx1, idx2) in schedule {
+        if selector {
+            id.swap(idx1, idx2);
+        }
+    }
+
+    assert_eq!(id, permutation);
 }

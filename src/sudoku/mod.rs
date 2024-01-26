@@ -12,6 +12,7 @@ mod tests;
 pub struct SudokuProblemTarget<const SIZE: usize, const SIZE_SQRT: usize> {
     problem: [[Target; SIZE]; SIZE],
     solution: [[Target; SIZE]; SIZE],
+    symbols: [Target; SIZE],
     row_swap_selectors: [Vec<Target>; SIZE],
     column_swap_selectors: [Vec<Target>; SIZE],
     region_swap_selectors: [Vec<Target>; SIZE],

@@ -1,3 +1,6 @@
+use plonky2::{field::types::Field, iop::witness::WitnessWrite};
+use rand::distributions::Distribution;
+
 /// Helper function to generate symbols and a list of problems
 /// The return value is a tuple, laid out as
 /// `(symbols, impl Iterator<Item = (solution, problem)>)`
@@ -83,6 +86,8 @@ fn numeric_setup_values(
     (symbols, grids_iter)
 }
 
+/// Tests that we are able to prove knowledge of valid solution to
+/// sudoku problem instances.
 #[test]
 fn test_valid_sudoku_problems() {
     const NR_RANDOM_MASKS_PER_PROBLEM: usize = 4;
@@ -137,5 +142,102 @@ fn test_valid_sudoku_problems() {
                 .expect("Proof verification goes wrong");
             "Proof verification takes {:?}"
         }
+    }
+}
+
+/// Tests that we are able to prove knowledge of valid solution to
+/// sudoku problem instances.
+///
+/// This test is not really satisfactory because it fails at witness
+/// generation stage.
+/// We were not able to generate invalid witnesses to test how the prover
+/// would react being given logically inconsistent input.
+///
+/// TODO: if we have time, try building a more satisfactory test.
+#[test]
+fn test_invalid_sudoku_problems() {
+    const NR_RANDOM_MASKS_PER_PROBLEM: usize = 4;
+
+    const SIZE: usize = 9;
+    const SIZE_SQRT: usize = 3;
+
+    type PlonkConfig = plonky2::plonk::config::PoseidonGoldilocksConfig;
+    const FIELD_EXTENSION_DEGREE: usize = 2;
+    type BaseField =
+        <PlonkConfig as plonky2::plonk::config::GenericConfig<FIELD_EXTENSION_DEGREE>>::F;
+
+    let circuit_config =
+        plonky2::plonk::circuit_data::CircuitConfig::standard_recursion_zk_config();
+
+    let uniform_size = rand::distributions::Uniform::new(0, SIZE);
+    let uniform_size_minus_1 = rand::distributions::Uniform::new(1, SIZE);
+
+    let (_symbols, sudoku_problem_instances) = numeric_setup_values(NR_RANDOM_MASKS_PER_PROBLEM);
+
+    for (mut solution, problem) in sudoku_problem_instances {
+        // We have to build the circuit from scratch at every iteration because
+        // `plonky2::plonk::circuit_data::CircuitData` is not `Clone`,
+        // and because its serialization methods require a lot of overhead to be used.
+        let mut builder = plonky2::plonk::circuit_builder::CircuitBuilder::<
+            BaseField,
+            FIELD_EXTENSION_DEGREE,
+        >::new(circuit_config.clone());
+
+        let sudoku_problem_target =
+            super::SudokuCircuitBuilder::<SIZE, SIZE_SQRT>::add_proof_of_sudoku_solution_no_panic(
+                &mut builder,
+            )
+            .expect("Circuit building goes wrong.");
+
+        let circuit = builder.build::<PlonkConfig>();
+
+        // We corrupt the solution of this sudoku instance by
+        // changing a random cell to a random invalid value.
+
+        // We extract the coordinates of the cell to corrupt.
+        let err_row_idx = uniform_size.sample(&mut rand::rngs::OsRng);
+        let err_col_idx = uniform_size.sample(&mut rand::rngs::OsRng);
+
+        // We change its value to any other valid symbol.
+        // We assume that `_symbols = [1..=SIZE]`
+        let old_value = solution[err_row_idx][err_col_idx];
+        let new_value = uniform_size_minus_1.sample(&mut rand::rngs::OsRng);
+        let new_value = if new_value < old_value {
+            new_value
+        } else {
+            new_value + 1
+        };
+        solution[err_row_idx][err_col_idx] = new_value;
+
+        println!("modified ({err_row_idx}, {err_col_idx})");
+        println! {"["};
+        for row in solution {
+            println! {"  {:?}", row};
+        }
+        println! {"]"};
+
+        // Now we perform the witness and proof building operations as usual,
+        // expecting that the proof generation will fail.
+
+        let mut witness = plonky2::iop::witness::PartialWitness::<BaseField>::new();
+
+        witness.set_target_arr(
+            &sudoku_problem_target.symbols,
+            &core::array::from_fn::<_, SIZE, _>(|n| BaseField::from_canonical_usize(n + 1)),
+        );
+
+        super::SudokuWitnessBuilder::set_sudoku_witness(
+            &mut witness,
+            &sudoku_problem_target,
+            problem,
+            solution,
+        );
+
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            circuit
+                .prove(witness)
+                .expect_err("Invalid witnesses should generate invalid proofs.")
+        }))
+        .expect_err("Invalid witness inputs");
     }
 }
