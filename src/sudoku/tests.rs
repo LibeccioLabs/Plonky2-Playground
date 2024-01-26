@@ -1,5 +1,3 @@
-use plonky2::iop::witness::WitnessWrite;
-
 /// Helper function to generate symbols and a list of problems
 /// The return value is a tuple, laid out as
 /// `(symbols, impl Iterator<Item = (solution, problem)>)`
@@ -111,7 +109,7 @@ fn test_valid_sudoku_problems() {
 
     let circuit = builder.build::<PlonkConfig>();
 
-    let (symbols, sudoku_problem_instances) = numeric_setup_values(NR_RANDOM_MASKS_PER_PROBLEM);
+    let (_symbols, sudoku_problem_instances) = numeric_setup_values(NR_RANDOM_MASKS_PER_PROBLEM);
 
     for (solution, problem) in sudoku_problem_instances {
         let mut witness = plonky2::iop::witness::PartialWitness::<BaseField>::new();
@@ -123,10 +121,21 @@ fn test_valid_sudoku_problems() {
             solution,
         );
 
-        let proof = circuit.prove(witness).expect("proof generation goes wrong");
+        let proof = crate::time_it! {
+            circuit.prove(witness).expect("proof generation goes wrong");
+            "Proof generation takes {:?}"
+        };
 
-        circuit
-            .verify(proof)
-            .expect("Proof verification goes wrong");
+        println! {
+            "Proof size is {}",
+            proof.to_bytes().len()
+        };
+
+        crate::time_it! {
+            circuit
+                .verify(proof)
+                .expect("Proof verification goes wrong");
+            "Proof verification takes {:?}"
+        }
     }
 }

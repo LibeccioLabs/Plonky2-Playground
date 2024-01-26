@@ -6,6 +6,8 @@ pub mod permutation;
 
 pub mod sudoku;
 
+pub mod utilities;
+
 // Before we have any clear idea on how this works, let's just play around
 // with an attempt at building a minimum viable circuit.
 //

@@ -73,7 +73,6 @@ fn recursive_permutation_to_2_split_schedule(
     offset: usize,
     mut out: Vec<(bool, usize, usize)>,
 ) -> Vec<(bool, usize, usize)> {
-    println!("{offset} - {permutation:?}");
     let len = permutation.len();
     match len {
         0 | 1 => return out,

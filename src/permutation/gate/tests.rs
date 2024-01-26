@@ -34,8 +34,6 @@ fn test_gate_4_objects() {
     type PlonkConfig = plonky2::plonk::config::PoseidonGoldilocksConfig;
     type BaseField = <PlonkConfig as GenericConfig<D>>::F;
 
-    let start_timer = std::time::Instant::now();
-
     let circuit_config =
         plonky2::plonk::circuit_data::CircuitConfig::standard_recursion_zk_config();
 
@@ -72,10 +70,6 @@ fn test_gate_4_objects() {
 
     let p_circuit = builder.build::<PlonkConfig>();
 
-    let end_timer = std::time::Instant::now();
-
-    println!("Building the circuit takes {:?}", end_timer - start_timer);
-
     // will be properly initialized and mutated by PermutationsIter
     let mut permutation_buffer = [0; N_OBJECTS];
 
@@ -87,53 +81,44 @@ fn test_gate_4_objects() {
     let mut proofs = vec![];
     for permutation in PermutationsIter::from(permutation_buffer.as_mut_slice()) {
         let mut permutation = permutation.expect("The iterator yields a mutable reference to the slice given to the constructor. Iteration fails only if we try getting more than one such ref at the same time.");
-        println!("{permutation:?}");
 
-        let start_timer = std::time::Instant::now();
+        crate::time_it! {{
+                let mut witness = PartialWitness::<BaseField>::new();
 
-        let mut witness = PartialWitness::<BaseField>::new();
+                // The input is always the 0..N_OBJECTS range.
+                witness.set_target_arr(virtual_pub_inputs.as_slice(), items.as_slice());
 
-        // The input is always the 0..N_OBJECTS range.
-        witness.set_target_arr(virtual_pub_inputs.as_slice(), items.as_slice());
+                // if we apply the permutation P to the input items,
+                // calling Q its inverse we will observe an output consisting of
+                // (0..N_OBJECTS).map(|idx| Q(idx))
+                inverse_permutation(*permutation, inverse_p.as_mut_slice());
+                let permutated_items: [_; N_OBJECTS] = core::array::from_fn(|idx| items[inverse_p[idx]]);
+                witness.set_target_arr(
+                    virtual_pub_inputs_permutation.as_slice(),
+                    permutated_items.as_slice(),
+                );
 
-        // if we apply the permutation P to the input items,
-        // calling Q its inverse we will observe an output consisting of
-        // (0..N_OBJECTS).map(|idx| Q(idx))
-        inverse_permutation(*permutation, inverse_p.as_mut_slice());
-        let permutated_items: [_; N_OBJECTS] = core::array::from_fn(|idx| items[inverse_p[idx]]);
-        witness.set_target_arr(
-            virtual_pub_inputs_permutation.as_slice(),
-            permutated_items.as_slice(),
-        );
+                let selectors: Vec<BaseField> =
+                    DefaultSwapSchedule::permutation_to_swap_schedule(*permutation)
+                        .into_iter()
+                        .map(|(selector, _idx1, _idx2)| BaseField::from_canonical_i64(selector.into()))
+                        .collect();
+                witness.set_target_arr(virtual_swap_selectors.as_slice(), selectors.as_slice());
 
-        let selectors: Vec<BaseField> =
-            DefaultSwapSchedule::permutation_to_swap_schedule(*permutation)
-                .into_iter()
-                .map(|(selector, _idx1, _idx2)| BaseField::from_canonical_i64(selector.into()))
-                .collect();
-        witness.set_target_arr(virtual_swap_selectors.as_slice(), selectors.as_slice());
-
-        proofs.push(p_circuit.prove(witness).expect("proof generation fails."));
-
-        let end_timer = std::time::Instant::now();
-
-        println!("Computing the proof takes {:?}", end_timer - start_timer);
+                proofs.push(p_circuit.prove(witness).expect("proof generation fails."));
+            }; "Computing the proof takes {:?}"
+        };
 
         let proof = proofs.last().expect("we just pushed to this vector.");
         println!("proof size: {}", proof.to_bytes().len());
 
-        let start_timer = std::time::Instant::now();
-
-        p_circuit
-            .verify(proof.clone())
-            .expect("proof verification fails.");
-
-        let end_timer = std::time::Instant::now();
-
-        println!("Verifying the proof takes {:?}", end_timer - start_timer);
+        crate::time_it! {
+            p_circuit
+                .verify(proof.clone())
+                .expect("proof verification fails.");
+            "Verifying the proof takes {:?}"
+        };
     }
-
-    let start_timer = std::time::Instant::now();
 
     // now we build a circuit that aggregates all the previous proofs into one.
 
@@ -168,25 +153,12 @@ fn test_gate_4_objects() {
 
     let aggregated_proof_circuit = builder.build::<PlonkConfig>();
 
-    let end_timer = std::time::Instant::now();
-
-    println!(
-        "Building the recursive circuit takes {:?}",
-        end_timer - start_timer
-    );
-
-    let start_timer = std::time::Instant::now();
-
-    let aggregated_proof = aggregated_proof_circuit
-        .prove(witness)
-        .expect("Generation of aggregated proof fails.");
-
-    let end_timer = std::time::Instant::now();
-
-    println!(
-        "Computing the recursive proof takes {:?}",
-        end_timer - start_timer
-    );
+    let aggregated_proof = crate::time_it! {
+        aggregated_proof_circuit
+            .prove(witness)
+            .expect("Generation of aggregated proof fails.");
+        "Computing the recursive proof takes {:?}"
+    };
 
     // We can observe that combining all the previous proofs takes a long time,
     // but the size of the combined proof is about the same as any of the
@@ -196,16 +168,10 @@ fn test_gate_4_objects() {
         aggregated_proof.to_bytes().len()
     );
 
-    let start_timer = std::time::Instant::now();
-
-    aggregated_proof_circuit
-        .verify(aggregated_proof)
-        .expect("Verification of aggregated proof fails.");
-
-    let end_timer = std::time::Instant::now();
-
-    println!(
-        "Verifying the recursive proof takes {:?}",
-        end_timer - start_timer
-    );
+    crate::time_it! {
+        aggregated_proof_circuit
+            .verify(aggregated_proof)
+            .expect("Verification of aggregated proof fails.");
+        "Verifying the recursive proof takes {:?}"
+    };
 }
