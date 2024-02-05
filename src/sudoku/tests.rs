@@ -184,7 +184,7 @@ fn test_invalid_sudoku_problems() {
         >::new(circuit_config.clone());
 
         let sudoku_problem_target =
-            super::SudokuCircuitBuilder::<SIZE, SIZE_SQRT>::add_proof_of_sudoku_solution_no_panic(
+            super::SudokuCircuitBuilder::<SIZE, SIZE_SQRT>::add_proof_of_sudoku_solution_fail_gracefully(
                 &mut builder,
             )
             .expect("Circuit building goes wrong.");
@@ -233,11 +233,10 @@ fn test_invalid_sudoku_problems() {
             solution,
         );
 
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            circuit
-                .prove(witness)
-                .expect_err("Invalid witnesses should generate invalid proofs.")
-        }))
-        .expect_err("Invalid witness inputs");
+        let invalid_proof = circuit.prove(witness).expect("Proof generation fails.");
+
+        circuit
+            .verify(invalid_proof)
+            .expect_err("An invalid proof was accepted");
     }
 }

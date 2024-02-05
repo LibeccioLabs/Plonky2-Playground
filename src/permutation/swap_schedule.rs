@@ -1,5 +1,3 @@
-use crate::permutation;
-
 pub trait SwapSchedule {
     /// Given a number `n_objects`, it outputs a sequence of
     /// swaps that would be attempted on a `n_objects` long vector.

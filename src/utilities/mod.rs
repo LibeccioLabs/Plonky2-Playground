@@ -1,3 +1,5 @@
+pub mod test_connect_gate;
+
 /// measures the time needed to execute an expression.
 ///
 /// It accepts two input formats:
