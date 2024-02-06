@@ -22,7 +22,7 @@ use super::{
 /// For the love of god, please do not run it on debug mode,
 /// it is about 30 times slower.
 #[test]
-fn test_gate_4_objects() {
+fn test_permutation_gate() {
     const N_OBJECTS: usize = 4;
 
     // The permutation gate gives the option to check that the selectors
