@@ -2,7 +2,6 @@ pub mod permutation;
 
 pub mod sudoku;
 
-pub mod utilities;
+pub mod factorial;
 
-#[cfg(test)]
-mod test_proof_aggregation;
+pub mod utilities;
