@@ -1,5 +1,7 @@
 pub mod test_connect_gate;
 
+pub mod copy_of_private_plonky2_functions;
+
 /// measures the time needed to execute an expression.
 ///
 /// It accepts two input formats:

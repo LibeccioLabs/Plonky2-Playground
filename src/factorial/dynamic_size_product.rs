@@ -16,6 +16,34 @@ use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 
 use std::sync::OnceLock;
 
+/// This struct holds all the relevant data for a circuit that is capable
+/// of computing the product of arbitrarily many consecutive numbers.
+///
+/// The utility functions `prove` and `verify` are provided to
+/// abstract the details of the workflow needed to achieve this functionality.
+///
+/// Nonetheless, a high level overview is: first there is the computation
+/// of a product of a fixed amount of consecutive numbers. Then, this
+/// computation is embedded into a cyclically recursive circuit, so that
+/// the same computation can be aggregated over and over until the desired
+/// number of factors has been multiplied together.
+/// Then, the resulting proof is fed to a further circuit that only exposes
+/// the desired inputs, which in our case are the number of factors and
+/// the final product.
+///
+/// The verifier of this final proof reads two public inputs, let's name them
+/// `n_factors` and `product`, and is convinced that the prover knows a number
+/// `k` such that
+///
+/// ``` text
+/// k * (k + 1) * ... * (k + n_factors - 1) == product
+/// ```
+///
+/// or more formally
+///
+/// ``` text
+/// (k .. k + n_factors).fold(1, |prod, factor| {prod * factor}) == product
+/// ```
 pub struct RecursiveProdCircuitData {
     recursive_circuit_data: CircuitData<BaseField, PGConfig, D>,
     n_factors_target: Target,
@@ -38,36 +66,64 @@ impl RecursiveProdCircuitData {
         CircuitData<BaseField, PGConfig, D>,
         ProofWithPublicInputsTarget<D>,
     ) {
-        PRODUCT_CIRCUIT_DATA.get_or_init(|| {
-            let circuit_config = CircuitConfig::standard_recursion_zk_config();
-            let mut circuit_builder = CircuitBuilder::<BaseField, D>::new(circuit_config);
-
-            let inner_proof_target =
-                circuit_builder.add_virtual_proof_with_pis(&self.recursive_circuit_data.common);
-
-            let inner_proof_verifier_target =
-                circuit_builder.constant_verifier_data(&self.recursive_circuit_data.verifier_only);
-
-            circuit_builder.verify_proof::<PGConfig>(
-                &inner_proof_target,
-                &inner_proof_verifier_target,
-                &self.recursive_circuit_data.common,
-            );
-            // we register two public inputs: one is the number of factors in the product,
-            // and the other is the product itself.
-            // Those numbers are available in the public input targets of
-            // the inner proof.
-            circuit_builder.register_public_input(
-                inner_proof_target.public_inputs[self.n_factors_public_input_idx],
-            );
-            circuit_builder.register_public_input(
-                inner_proof_target.public_inputs[self.product_after_chunk_public_input_idx],
-            );
-
-            (circuit_builder.build(), inner_proof_target)
-        })
+        PRODUCT_CIRCUIT_DATA.get_or_init(|| self.product_circuit_data_constructor())
     }
 
+    fn product_circuit_data_constructor(
+        &self,
+    ) -> (
+        CircuitData<BaseField, PGConfig, D>,
+        ProofWithPublicInputsTarget<D>,
+    ) {
+        let circuit_config = CircuitConfig::standard_recursion_zk_config();
+        let mut circuit_builder = CircuitBuilder::<BaseField, D>::new(circuit_config);
+
+        let inner_proof_target =
+            circuit_builder.add_virtual_proof_with_pis(&self.recursive_circuit_data.common);
+
+        let inner_verifier_target =
+            circuit_builder.constant_verifier_data(&self.recursive_circuit_data.verifier_only);
+
+        circuit_builder.verify_proof::<PGConfig>(
+            &inner_proof_target,
+            &inner_verifier_target,
+            &self.recursive_circuit_data.common,
+        );
+
+        // here we make sure that the recursive proof's data is correctly matched
+        // by connecting the verifier data encoded in the public input of the
+        // recursive proof to the constant verifier data we know to be correct.
+        let public_input_inner_verifier_target =
+            crate::utilities::copy_of_private_plonky2_functions::from_slice(
+                &inner_proof_target.public_inputs,
+                &self.recursive_circuit_data.common,
+            )
+            .expect("inner proof has enough public inputs");
+        circuit_builder
+            .connect_verifier_data(&inner_verifier_target, &public_input_inner_verifier_target);
+
+        // we register two public inputs: one is the number of factors in the product,
+        // and the other is the product itself.
+        // Those numbers are available in the public input targets of
+        // the inner proof.
+        circuit_builder.register_public_input(
+            inner_proof_target.public_inputs[self.n_factors_public_input_idx],
+        );
+        circuit_builder.register_public_input(
+            inner_proof_target.public_inputs[self.product_after_chunk_public_input_idx],
+        );
+
+        (circuit_builder.build(), inner_proof_target)
+    }
+
+    /// Computes
+    ///  
+    /// ``` text
+    /// starting_product * first_factor * (first_factor + 1) * ... * (first_factor + n_factors - 1)
+    /// ```
+    ///
+    /// and creates a proof that exposes `n_factors` and the computed product
+    /// as public inputs.
     pub fn prove(
         &self,
         n_factors: usize,
@@ -122,6 +178,19 @@ impl RecursiveProdCircuitData {
             .expect("proof generation fails")
     }
 
+    /// Upon successful verification of the proof, the verifier knows that,
+    /// naming `n_factors` and `product` the public inputs of the proof,
+    /// the prover knows a number `k` such that
+    ///
+    /// ``` text
+    /// k * (k + 1) * ... * (k + n_factors - 1) == product
+    /// ```
+    ///
+    /// or more formally
+    ///
+    /// ``` text
+    /// (k .. k + n_factors).fold(1, |prod, factor| {prod * factor}) == product
+    /// ```
     pub fn verify(
         &self,
         proof_with_public_inputs: ProofWithPublicInputs<BaseField, PGConfig, 2>,
@@ -261,24 +330,9 @@ fn build_recursive_product_circuit(
         }
 
         circuit_builder.build::<PGConfig>()
-        // Instead of calling
-        // `CircuitBuilder::add_verifier_data_public_inputs`,
-        // we manually create a verifier data target
-        // and register it as public input.
-        //
-        // This mocks what `add_verifier_data_public_inputs` does,
-        // but it does not signal to the circuit builder that
-        // cyclic verification is being used.
-        // let verifier_data =
-        //     circuit_builder.add_virtual_verifier_data(circuit_config.fri_config.cap_height);
-        // circuit_builder.register_public_inputs(&verifier_data.circuit_digest.elements);
-        // for i in 0..circuit_builder.config.fri_config.num_cap_elements() {
-        //     circuit_builder
-        //         .register_public_inputs(&verifier_data.constants_sigmas_cap.0[i].elements);
-        // }
     }
-    // On the other hand, if we are not producing dummy circuit data, we
-    // actually add the cyclic verification structure, using the data
+    // If we are not producing dummy circuit data, we
+    // compute the structure of the inner proof using the data
     // produced by a recursive call to this function.
     else {
         build_recursive_product_circuit(total_bootstrap_steps, remaining_bootstrap_steps - 1)
@@ -323,7 +377,8 @@ fn build_recursive_product_circuit(
 
         // We verify the recursive proof if this is not the base case.
         //
-        // WARNING: this function introduces some public inputs, and
+        // WARNING: this function introduces public inputs that will be used to
+        // encode the verification key for cyclic proof verification, and
         // no public inputs should be registered after this function
         // is called. This is because the function
         // `CircuitBuilder::conditionally_verify_cyclic_proof`

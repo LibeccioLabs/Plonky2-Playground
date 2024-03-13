@@ -2,6 +2,18 @@ use super::*;
 
 use plonky2::{field::types::Field, iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 
+/// Stores the information of a product of consecutive numbers embedded in a circuit.
+/// The `first_factor` field identifies the position of the first number in the product,
+/// let's call that number `n`. The `n_factors` number specifies how long is the product
+/// being computed, i.e.
+/// `n * (n + 1) * ... * (n + n_factors - 1)`
+/// or more formally
+/// `(n .. n + n_factors).fold(1, |prod, factor| prod * factor)`.
+/// The `product_targets` field keeps track of all the targets that were created to
+/// build the total product. more precisely, for every valid index `idx`, it holds
+/// `product_targets[i] == (n .. n + idx).fold(1, |prod, factor| prod * factor)`
+/// or equivalently, `product_targets[0] = 1`, and for every valid `idx` it holds
+/// `product_targets[idx + 1] == product_targets[idx] * (n + idx)`
 pub struct ConsecutiveProduct {
     n_factors: usize,
     first_factor: Target,
@@ -30,6 +42,12 @@ fn build_prod_subcircuit(
 }
 
 impl ConsecutiveProduct {
+    /// Given a mutable reference to a `CircuitBuilder` instance, and given an
+    /// `n_factors` number, this function adds a subcircuit that encodes the product
+    /// of `n_factors` consecutive numbers. The first factor to be used in the product
+    /// is encoded in a new virtual target stored in the `first_factor` field of the
+    /// returned `ConsecutiveProduct` instance, and must later be connected to
+    /// a concrete value.
     pub fn new(circuit_builder: &mut CircuitBuilder<BaseField, D>, n_factors: usize) -> Self {
         let private_input = circuit_builder.add_virtual_target();
 
@@ -42,18 +60,50 @@ impl ConsecutiveProduct {
         }
     }
 
+    /// Grants read access to `self.first_factor`
     pub fn first_factor_target(&self) -> Target {
         self.first_factor
     }
 
+    /// A utility function to clone `self.product_targets`
     pub fn clone_product_targets(&self) -> Vec<Target> {
         self.product_targets.clone()
     }
 
+    /// Grants read access to `self.product_targets[n_factors]`
+    ///
+    /// The output is the target where the number
+    /// ``` text
+    /// self.first_factor * (self.first_factor + 1) * ... * (self.first_factor + n_factors - 1)
+    /// ```
+    /// or more formally the number
+    /// ``` text
+    /// (self.first_factor .. self.first_factor + n_factors).fold(
+    ///     self.first_factor,
+    ///     |prod, factor| prod * factor
+    /// )
+    /// ```
+    /// is stored.
     pub fn partial_product_target(&self, n_factors: usize) -> Option<Target> {
         self.product_targets.get(n_factors).map(|t| t.clone())
     }
 
+    /// Outputs the position where the circuit stores the product
+    ///
+    /// ``` text
+    /// self.first_factor * (self.first_factor + 1) * ... * (self.first_factor + self.n_factors - 1)
+    /// ```
+    ///
+    /// or more formally
+    ///
+    /// ``` text
+    /// (self.first_factor .. self.first_factor + self.n_factors).fold(
+    ///     self.first_factor,
+    ///     |prod, factor| prod * factor
+    /// )
+    /// ```
+    ///
+    /// Equivalent to `self.partial_product_target(self.n_factors)`.
     pub fn final_product_target(&self) -> Target {
         self.product_targets
             .last()
